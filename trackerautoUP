@@ -1,0 +1,228 @@
+#!/usr/bin/perl -w
+##### trackerautoUP 1.06 - An Unrar And AutoUpload Script #####
+ 
+#########################################################
+##################BEGIN CONFIGURATION###################
+#########################################################
+ 
+###################Fasttorrent######################
+#Enter 0 For No, 1 For Yes
+my $fasttorrent = 1;
+ 
+###################Full Anounce URL######################
+#Ex. my $announce = "http://tracker.tracker.net:34000/PASSKEY/announce"
+my $announce = "";
+ 
+####################tracker Login Info#######################
+my $username = "";
+my $password = "";
+ 
+###############Output Folder For Media###################
+#Ex. /home/gonephishin/data/tvshows/uploads/
+my $output_folder = "";
+ 
+###############Output Folder For Info####################
+#This Directory Is Used To Backup Scene .nfos And
+#To Store mediainfo Output Files
+#Ex. /home/gonephishin/nfobackup/
+my $nfo_folder = "";
+ 
+###############Output Folder For Torrents################
+#DO NOT USE YOUR CLIENT'S WATCH DIRECTORY FOR THIS
+#THIS IS IMPORTANT AS SOME CLIENTS DO NOT LEAVE THE
+#TORRENT FILE IN THE WATCH DIRECTORY (DELUGE) AND WE NEED
+#THE FILE IN ORDER TO FILL OUT THE UPLOAD FORM
+#Ex. /home/gonephishin/torrentfilesbackup/
+my $torrent_output = "";
+ 
+###############Client Watch Directory####################
+#Once The .torrent File Is Created It Will Be Copied
+#To Your Client's Watch Folder
+#Ex. /home/gonephishin/watch/tvshows/uploads/
+my $client_watch = "";
+ 
+#########################################################
+##################END OF CONFIGURATION###################
+###########DO NOT EDIT BELOW THIS LINE UNLESS############
+###############YOU KNOW WHAT YOU ARE DOING###############
+#########################################################
+ 
+use strict;
+use warnings;
+use WWW::Mechanize;
+ 
+#########################################################
+###################Check Variables#######################
+#########################################################
+ 
+if (!$announce) {
+        print "No Announce URL In Configuration, Please Fix This\n";
+        exit 0;
+}
+if (!$username) {
+        print "No BTN Username In Configuration, Please Fix This\n";
+        exit 0;
+}
+if (!$password) {
+        print "No BTN Password In Configuration, Please Fix This\n";
+        exit 0;
+}
+if (!$output_folder) {
+        print "No Output Directory In Configuration, Please Fix This\n";
+        exit 0;
+}
+if (!$nfo_folder) {
+        print "No Info Directory In Configuration, Please Fix This\n";
+        exit 0;
+}
+if (!$torrent_output) {
+        print "No Torrent Output Directory In Configuration, Please Fix This\n";
+        exit 0;
+}
+if (!$client_watch) {
+        print "No Client Watch Directory In Configuration, Please Fix This\n";
+        exit 0;
+}
+if ($torrent_output eq $client_watch) {
+        print "Torrent Output Directory And Client Watch Directory Cannot Be The Same, Please Fix This\n";
+        exit 0;
+}
+ 
+#########################################################
+###################File Preperation######################
+#########################################################
+ 
+###################Get Directory Name####################
+my $numArgs = $#ARGV; #Retrieves Directory From User Input
+my $show_dir = ''; #Declares Directory Name
+if ($numArgs == -1) { #If No Directory Is Supplied, Warns User And Quit Script
+        print "Need Directory Parameter\n";
+        print "Correct Syntax Is:\n";
+        print "perl btnautoup.pl /path/to/directory/\n";
+        exit 0;
+}
+foreach $numArgs ($#ARGV) { #If Multiple Directories Were Supplied, Only Use Last One
+        $show_dir = $ARGV[$numArgs];
+}
+ 
+###################Remove Trailing Slashes From Directory Variables####################
+$show_dir =~ s/\/$//;
+$output_folder =~ s/\/$//;
+$torrent_output =~ s/\/$//;
+$client_watch =~ s/\/$//;
+$nfo_folder =~ s/\/$//;
+ 
+###################Get Release Name From Directory####################
+my $release_name = "$show_dir"; #Declares Release Name
+if ($show_dir =~ /.*\/(.*)/) { #Removes Path Up To Last Directory To Retrieve Release Name
+        $release_name = $1; #Sets Release Name To Regex Output
+}
+ 
+###################Find The Rar File####################
+opendir(DIR, $show_dir); #Opens The Directory
+my @tempfiles = grep(/\.rar$/,readdir(DIR)); #Scans for files ending in .rar
+closedir(DIR); #Closes The Directory
+my $rar_file = $tempfiles[0]; #Chooses First .rar File Found
+$rar_file = "$show_dir\/$rar_file"; #Adds Full Path To Rar File Name
+ 
+###################Find The NFO File####################
+opendir(DIR, $show_dir); #Opens The Directory
+@tempfiles = grep(/\.nfo$/,readdir(DIR)); #Scans for files ending in .nfo
+closedir(DIR); #Closes The Directory
+my $nfo_name = $tempfiles[0]; #Chooses First .nfo File Found
+my $nfo_file = "$show_dir\/$nfo_name"; #Adds Full Path To Rar File Name
+ 
+###################Backup The NFO File####################
+print "Backing Up $nfo_name, Please Wait.\n"; #Alerts The User That We Are Going To Backup The Scene NFO File
+`cp -f \"$nfo_file\" \"$nfo_folder\/$nfo_name\"`; #Copies The NFO File To The Backup Directory
+ 
+###################Retrieve The Extracted File Name####################
+my $output_file = `unrar l \"$rar_file\"|grep -E \'\(avi|mkv\)\'`; #Retrieves Name Of Extracted File From .rar File
+$output_file =~ /\ (.*?)(\.avi|\.mkv)/i; #Parses unrar Output
+$output_file = $1 . $2; #Combines File Name And Extension
+$output_file = "$output_folder\/$output_file"; #Adds Full Path To Output File
+ 
+###################Unrar The File####################
+my $rar_command = "unrar e \"$rar_file\" \"$output_folder\""; #Creates The Command Used To Unrar The Episode
+print "Unraring $output_file, Please Wait.\n"; #Alerts The User That We Are Going To Unrar
+`$rar_command`; #Unrars The File
+ 
+###################Mediainfo Extraction####################
+my $media_info_file = "$nfo_folder\/$release_name.mediainfo.nfo"; #Sets Name For MediaInfo Output
+my $media_info_command = "mediainfo --LogFile=\"$media_info_file\" \"$output_file\""; #Writes Command To Extract MediaInfo
+print "Getting MediaInfo for $release_name, Please Wait.\n"; #Alerts The User That We Are Going To Unrar
+`$media_info_command`; #Gets MediaInfo
+ 
+###################Mediainfo Parsing####################
+my $privacy_command = "/usr/bin/perl -p -i -e \"s/\Q$output_folder\E/PathRemoved/g\" \"$media_info_file\""; #Writes Command To Remove Full File Path From MediaInfo Output
+print "Removing File Path From MediaInfo for $release_name, Please Wait.\n"; #Alerts The User That We Are Going To Unrar
+`$privacy_command`; #Fixes MediaInfo
+open (MNFO, "$media_info_file"); #Opens The MediaInfo File
+my $media_info_data = join("", <MNFO>); #Loads The Contents Of The MediaInfo File
+close MNFO; #Closes The MediaInfo File
+ 
+###################Make The Torrent File####################
+my $torrent_name = "$release_name.[BTN].torrent"; #Sets Name For Torrent File
+my $torrent_file = "$torrent_output\/$torrent_name"; #Sets Full Path For Torrent File
+my $torrent_command = "mktorrent -p -a \"$announce\" -o \"$torrent_file\" \"$output_file\""; #Creates The Command Used To Create A Torrent
+print "Making $torrent_name, Please Wait.\n"; #Alerts The User That We Are Going To Make A Torrent
+`$torrent_command`; #Creates The .torrent File
+ 
+###################Adding Torrent To Client####################
+my $client_file = "$client_watch\/$torrent_name"; #Sets Full Path For Client File
+print "Adding $torrent_name To Client, Please Wait.\n"; #Alerts The User That We Are Going To Add The Torrent To The Client
+`cp -f \"$torrent_file\" \"$client_file\"`; #Copies The Torrent File To The Client Directory
+ 
+#########################################################
+####################Torrent Upload#######################
+#########################################################
+ 
+###################Login To BTN##########################
+my $mech = WWW::Mechanize->new( autocheck => 1 ); #Initializes WWW::Mechanize
+$mech->get("https://broadcasthe.net/login.php"); #Retrieves The Login Page
+print "Logging Into BTN, Please Wait.\n"; #Alerts The User
+$mech->submit_form( #Logs Us Into BTN
+        form_number => 0,
+                fields => {
+                        username => "$username",
+                        password => "$password",
+                }
+        );
+###################Autofill Upload Form##################
+$mech->get("https://broadcasthe.net/upload.php"); #Loads Upload Page Into Mech
+print "Using BTN Autofill, Please Wait.\n"; #Alerts The User
+$mech->form_id('upload_table'); #Selects The Upload Table As The Current Form
+$mech->field('autofill', $release_name); #Enters The Scene Name Into Autofill
+$mech->click_button(value => 'Get Info'); #Clicks Autofill And Retrieves Completed Form
+ 
+###################Submit Upload Form##################
+print "Uploading Torrent To BTN, Please Wait.\n"; #Alerts The User
+$mech->form_id('upload_table'); #The Upload Page Has Been Reloaded So We Need To Select The Form Again
+my $yearcheck = $mech->value('year'); #Retrieves The Autofill Value For The Year Field
+my $genrecheck = $mech->value('tags'); #Retrieves The Autofill Value For The Genre Field
+my $tvtitlecheck = $mech->value('title'); #Retrieves The Autofill Value For The TV Title Field
+if (!$yearcheck) {
+        $mech->field('year', '2010'); #If Autofill Did Not Enter A Year, Enters 2010 As A Default
+}
+if (!$genrecheck) {
+        $mech->field('tags', 'Unknown'); #If Autofill Did Not Enter A Year, Enters Unknown As A Default
+}
+if (!$tvtitlecheck) {
+        print "Autofill Didn't Parse This Scene Release Correctly\n"; #If Autofill Did Not Enter A TV Title, Warns User And Quits
+        print "This Usually Occurs On Shows That Are Not In SXXEXX Format\n";
+        print "Please Use The .mediainfo.nfo And .torrent Files To Upload This Release Manually\n";
+        exit 0;
+}
+$mech->field('file_input', $torrent_file); #Inputs The .torrent File
+$mech->field('release_desc', $media_info_data); #Adds The MediaInfo Data To The NFO Text Field
+my $form = $mech->current_form(); #Chooses The Current Form, Needed For Next Command
+if ($fasttorrent) {
+        $form->find_input('fasttorrent')->check(); #Chooses The Fasttorrent Option If Specified In Config.
+}
+$mech->click(); #Clicks Upload Torrent
+ 
+###################Logout Of BTN##################
+$mech->get("https://broadcasthe.net/"); #Loads The Home Page
+print "Logging Out Of BTN, Please Wait.\n"; #Alerts The User
+$mech->follow_link(url_regex => qr/logout\.php/); #Logs Us Out
+ 
