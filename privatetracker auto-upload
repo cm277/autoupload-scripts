@@ -1,0 +1,177 @@
+#!/bin/bash
+# privatetracker auto-upload script by user
+# noobs want to read the next couple of lines:
+# 1. replace the below PIN and LOGINURL values with your login details
+# 2. make the script executable by using chmod +x privatetracker-upload.sh
+# 3. place this script into /usr/bin, /usr/local/bin or any other path that is included
+#    in the output of echo $PATH
+# 4. execute it by calling privatetracker-upload.sh .. if you didn't rename the file
+# 5. don't bug me with stupid questions ;-P
+ 
+PIN=42235
+LOGINURL="https://www.privatetracker.net/login.php?id=1337&hash=64ef367018099de4d4183ffa3bc0848a"
+######################################
+ 
+TMPPAGE="$(mktemp /tmp/privatetracker-page.XXXXXX)"
+COOKIES="$(mktemp /tmp/privatetracker-cookie.XXXXXX)"
+CGREEN="\033[0;32m"
+CRED="\033[0;31m"
+privatetrackerORM="\033[0m"
+TORRENT=""
+INT=0
+NFOFILE=""
+FORMATS="XviD=1;x264=3;HD=5;DVDR=7;BRRiP=29"
+ 
+function help(){
+cat << EOF
+privatetracker auto-uploader script by user
+================================
+Syntax:
+    privatetracker-upload.sh -torrent <torrentfile> -nfo <nfo or description> -format <format> [-anonymous] [-interval 0,1,2,3] [-o file]
+        -torrent        specify the torrent file you want to upload
+        -nfo            specity the nfo or description file you want to upload
+        -format         specify the format your upload is in, have a look at the botttom of this help to see the options
+        -anonymous      using this option (without a parameter) your nick won't be displayed as Uploader on the site
+        -interval       specify the permaseeding interval you want to use after the upload, 0 is the default
+        -o              specify the output file rather than overwriting the original torrent file when downloading
+ 
+Example:
+    privatetracker-upload.sh -interval 2 -torrent foobar.torrent -nfo foobar.txt -format xvid
+ 
+The torrent file you created will get overwritten on a successful upload, so you can directly
+put it into your torrent client. The file is downloaded afterwards. By using -interval
+you can control which permaseeding interval this torrent should be.
+ 
+Remember to put your pin code and your login URL into the beginning section of this script
+EOF
+ 
+echo "Available formats are: $(echo $FORMATS | sed -re 's,=[0-9]+;*, ,g')"
+}
+ 
+function login(){
+    echo -n "[+] Logging in to privatetracker...."
+    if ! curl -c $COOKIES -d "action=login&pincode=${PIN}" -i -s $LOGINURL -o $TMPPAGE || ! grep -q "Location: index.php" $TMPPAGE; then
+        echo -e "${CRED}couldn't login to privatetracker, aborting script, please check your login URL, pin code${privatetrackerORM} and network connectivity"
+        exit 256
+    else
+        echo -e "${CGREEN}logged in${privatetrackerORM}"
+    fi
+}
+ 
+function check_curl(){
+    if ! which curl > /dev/null; then
+        echo -e "${CRED}THIS SCRIPT NEEDS curl IN ORDER TO WORK${privatetrackerORM}"
+        echo "either you don't have curl installed or it is not in your \$PATH"
+        echo "please obtain a copy from http://curl.haxx.se/ and retry"
+        exit 1
+    fi
+}
+ 
+if [[ $# -eq 0 || "$1" == "-h" || "$1" == "--help" ]]; then
+    help
+    exit 0
+fi
+ 
+while [[ "$#" -gt "0" ]]; do
+    if [[ ${1:0:1} == "-" ]]; then
+        if [[ $1 == "-torrent" ]]; then
+            TORRENT="$2"
+            shift
+        elif [[ $1 == "-nfo" ]]; then
+            NFOFILE="$2"
+            shift
+        elif [[ $1 == "-format" ]]; then
+            FORMAT="$2"
+            shift
+        elif [[ $1 == "-interval" ]]; then
+            INT=$2
+            shift
+        elif [[ $1 == "-o" ]]; then
+            OUTFILE="$2"
+            shift
+        elif [[ $1 == "-anonymous" ]]; then
+            ANONYMOUS="yes"
+        else
+            echo -e "unknown option: ${CRED}$1${privatetrackerORM}"
+            help
+            exit 1
+        fi
+    else
+        help
+        exit 1
+    fi
+    shift
+done
+ 
+if [ "x$FORMAT" == "x" ]; then
+    echo "You need to specify a format to use"
+    help
+    exit 1
+fi
+ 
+if ! file $TORRENT | grep "BitTorrent file" > /dev/null 2>&1 ; then
+    echo -e "${CRED}$TORRENT${privatetrackerORM} is no valid torrent file, please check"
+    exit 1
+fi
+ 
+if ! echo $FORMATS | grep -iE "(^|;)$FORMAT=" > /dev/null; then
+    echo -e "${CRED}$FORMAT${privatetrackerORM} is no accepted format"
+    help
+    exit 1
+fi
+ 
+if ! echo $INT | grep -E '[0123]{1}' > /dev/null; then
+    echo -e "${CRED}$INT${privatetrackerORM} is not a valid permaseeding interval, please check"
+    help
+    exit 1
+fi
+ 
+UPFORM=$(echo $FORMATS | sed -re "s,(^|.*;)$FORMAT=([0-9]+).*,\2,gi")
+ 
+check_curl
+login
+ 
+if [ "x$ANONYMOUS" == "xyes" ]; then
+    echo -e "[+] Uploading this torrent ${CGREEN}anonymously${privatetrackerORM}"
+else
+    echo -e "[!] Uploading this torrent ${CRED}not anonymously${privatetrackerORM}"
+fi
+ 
+echo -e "[+] Uploading as ${CGREEN}$FORMAT${privatetrackerORM}"
+echo -ne "[+] Trying to upload ${CGREEN}$TORRENT${privatetrackerORM} - ${CGREEN}$NFOFILE${privatetrackerORM}..."
+ 
+if curl -b $COOKIES -F "file=@$TORRENT" -F "nfo=@$NFOFILE" -F "type=$UPFORM" -F "uplver=$ANONYMOUS" -s https://www.privatetracker.net/takeupload.php -o $TMPPAGE; then
+    if grep "Upload failed" $TMPPAGE > /dev/null; then
+        REASON="$(grep -A1 "Upload failed" $TMPPAGE | tail -1 | sed -re 's,.*<p>(.*)</p>.*,\1,')"
+        echo -e "${CRED}failed ($REASON)${privatetrackerORM}"
+        exit 1
+    else
+        echo -e "${CGREEN}success${privatetrackerORM}"
+    fi
+    echo
+    LINK="$(grep 'http-equiv="refresh"' $TMPPAGE | sed -re 's,.*url=(.*)" />.*,\1,')"
+    echo "Find your new upload on: $LINK"
+ 
+    ID=$(echo $LINK | sed -re 's,.*id=([0-9]+).*,\1,')
+    if [ "x$OUTFILE" != "x" ]; then
+        echo -ne "[+] Writing new torrent file to ${CGREEN}$OUTFILE${privatetrackerORM}..."
+        TORRENT=$OUTFILE
+    else
+        echo -ne "[+] Overwriting the initial torrent file ${CGREEN}$TORRENT${privatetrackerORM}..."
+    fi
+    if curl -g -b $COOKIES -o "$TORRENT" -s "https://www.privatetracker.net/download.php/$ID/$INT/$(basename $TORRENT)"; then
+        echo -e "${CGREEN}success${privatetrackerORM}"
+    else
+        echo -e "${CRED}failure${privatetrackerORM}"
+        echo "please check file permissions and $TMPPAGE"
+        exit 1
+    fi
+ 
+else
+    echo -e "${CRED}failure${privatetrackerORM}"
+    echo
+    echo "There has been a problem uploading your torrent file, please check the submitted files, network connectivity, login details..."
+    echo "Additionally you check check $TMPPAGE for possible error output, this file may include html"
+    exit 1
+fi
+ 
